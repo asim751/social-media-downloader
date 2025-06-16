@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { sanitizeFilename, generateCleanFilename } from '../../lib/filename-utils.js';
 
 const execAsync = promisify(exec);
 
@@ -80,7 +81,7 @@ export default async function handler(req, res) {
   }
 }
 
-// YouTube handler using yt-dlp
+// YouTube handler using yt-dlp with clean filenames
 async function handleYouTube(url, tempDir, uniqueId) {
   try {
     console.log('Processing YouTube URL with yt-dlp...');
@@ -90,9 +91,12 @@ async function handleYouTube(url, tempDir, uniqueId) {
     const { stdout: info } = await execAsync(infoCommand);
     const [title, duration, filesize, thumbnail] = info.trim().split('|');
     
-    // Download video
-    const outputPath = path.join(tempDir, `${uniqueId}_%(title)s.%(ext)s`);
-    const downloadCommand = `yt-dlp -f "best[ext=mp4]/best" -o "${outputPath}" "${url}"`;
+    // Create clean filename template
+    const cleanTitle = sanitizeFilename(title || 'YouTube_Video');
+    const outputTemplate = path.join(tempDir, `${uniqueId}_${cleanTitle}.%(ext)s`);
+    
+    // Download video with clean filename
+    const downloadCommand = `yt-dlp -f "best[ext=mp4]/best" -o "${outputTemplate}" "${url}"`;
     
     console.log('Executing:', downloadCommand);
     await execAsync(downloadCommand);
@@ -105,25 +109,30 @@ async function handleYouTube(url, tempDir, uniqueId) {
       throw new Error('Downloaded file not found');
     }
     
+    console.log('Downloaded file:', downloadedFile);
+    
     const fileSize = fs.statSync(path.join(tempDir, downloadedFile)).size;
     const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+    
+    // Generate clean display filename
+    const cleanDisplayName = sanitizeFilename(title || 'YouTube Video');
     
     return {
       type: 'video',
       quality: 'HD',
       size: `${fileSizeMB} MB`,
       title: title || 'YouTube Video',
-      thumbnail: thumbnail,
+      thumbnail: thumbnail !== 'NA' ? thumbnail : null,
       downloads: [
         {
           label: 'MP4 Video',
           url: `/api/stream?file=${encodeURIComponent(downloadedFile)}`,
-          filename: downloadedFile
+          filename: `${cleanDisplayName}.mp4`
         },
         {
           label: 'Audio Only (MP3)',
           url: `/api/stream?file=${encodeURIComponent(downloadedFile)}&format=mp3`,
-          filename: downloadedFile.replace(/\.[^/.]+$/, '.mp3')
+          filename: `${cleanDisplayName}.mp3`
         }
       ]
     };
@@ -134,18 +143,17 @@ async function handleYouTube(url, tempDir, uniqueId) {
   }
 }
 
-// Instagram handler
+// Instagram handler with clean filenames
 async function handleInstagram(url, tempDir, uniqueId) {
   try {
     console.log('Processing Instagram URL...');
     
-    // Try yt-dlp first (works for many Instagram URLs)
-    const outputPath = path.join(tempDir, `${uniqueId}_instagram.%(ext)s`);
+    const cleanFilename = `${uniqueId}_instagram.%(ext)s`;
+    const outputPath = path.join(tempDir, cleanFilename);
     const command = `yt-dlp -o "${outputPath}" "${url}"`;
     
     await execAsync(command);
     
-    // Find downloaded file
     const files = fs.readdirSync(tempDir).filter(f => f.startsWith(`${uniqueId}_instagram`));
     const downloadedFile = files[0];
     
@@ -165,7 +173,7 @@ async function handleInstagram(url, tempDir, uniqueId) {
         {
           label: downloadedFile.includes('.mp4') ? 'MP4 Video' : 'Image',
           url: `/api/stream?file=${encodeURIComponent(downloadedFile)}`,
-          filename: downloadedFile
+          filename: `instagram_media.${downloadedFile.split('.').pop()}`
         }
       ]
     };
@@ -176,61 +184,34 @@ async function handleInstagram(url, tempDir, uniqueId) {
   }
 }
 
-// TikTok handler
+// Placeholder handlers
 async function handleTikTok(url, tempDir, uniqueId) {
-  try {
-    console.log('Processing TikTok URL...');
-    
-    const outputPath = path.join(tempDir, `${uniqueId}_tiktok.%(ext)s`);
-    const command = `yt-dlp -o "${outputPath}" "${url}"`;
-    
-    await execAsync(command);
-    
-    const files = fs.readdirSync(tempDir).filter(f => f.startsWith(`${uniqueId}_tiktok`));
-    const downloadedFile = files[0];
-    
-    if (!downloadedFile) {
-      throw new Error('TikTok download failed');
-    }
-    
-    const fileSize = fs.statSync(path.join(tempDir, downloadedFile)).size;
-    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
-    
-    return {
-      type: 'video',
-      quality: 'Original',
-      size: `${fileSizeMB} MB`,
-      title: 'TikTok Video',
-      downloads: [
-        {
-          label: 'MP4 Video (No Watermark)',
-          url: `/api/stream?file=${encodeURIComponent(downloadedFile)}`,
-          filename: downloadedFile
-        }
-      ]
-    };
-    
-  } catch (error) {
-    console.error('TikTok download error:', error);
-    throw new Error(`TikTok download failed: ${error.message}`);
-  }
+  return handleGeneric(url, tempDir, uniqueId, 'tiktok');
 }
 
-// Generic handler for other platforms
-async function handleGeneric(url, tempDir, uniqueId) {
+async function handleTwitter(url, tempDir, uniqueId) {
+  return handleGeneric(url, tempDir, uniqueId, 'twitter');
+}
+
+async function handleFacebook(url, tempDir, uniqueId) {
+  return handleGeneric(url, tempDir, uniqueId, 'facebook');
+}
+
+async function handleGeneric(url, tempDir, uniqueId, platform = 'generic') {
   try {
-    console.log('Processing with generic handler...');
+    console.log(`Processing ${platform} URL...`);
     
-    const outputPath = path.join(tempDir, `${uniqueId}_generic.%(ext)s`);
+    const cleanFilename = `${uniqueId}_${platform}.%(ext)s`;
+    const outputPath = path.join(tempDir, cleanFilename);
     const command = `yt-dlp -o "${outputPath}" "${url}"`;
     
     await execAsync(command);
     
-    const files = fs.readdirSync(tempDir).filter(f => f.startsWith(`${uniqueId}_generic`));
+    const files = fs.readdirSync(tempDir).filter(f => f.startsWith(`${uniqueId}_${platform}`));
     const downloadedFile = files[0];
     
     if (!downloadedFile) {
-      throw new Error('Generic download failed');
+      throw new Error(`${platform} download failed`);
     }
     
     const fileSize = fs.statSync(path.join(tempDir, downloadedFile)).size;
@@ -240,27 +221,18 @@ async function handleGeneric(url, tempDir, uniqueId) {
       type: 'media',
       quality: 'Original',
       size: `${fileSizeMB} MB`,
-      title: 'Downloaded Media',
+      title: `${platform.charAt(0).toUpperCase() + platform.slice(1)} Media`,
       downloads: [
         {
           label: 'Download File',
           url: `/api/stream?file=${encodeURIComponent(downloadedFile)}`,
-          filename: downloadedFile
+          filename: `${platform}_media.${downloadedFile.split('.').pop()}`
         }
       ]
     };
     
   } catch (error) {
-    console.error('Generic download error:', error);
-    throw new Error(`Download failed: ${error.message}`);
+    console.error(`${platform} download error:`, error);
+    throw new Error(`${platform} download failed: ${error.message}`);
   }
-}
-
-// Placeholder handlers (implement as needed)
-async function handleTwitter(url, tempDir, uniqueId) {
-  return handleGeneric(url, tempDir, uniqueId);
-}
-
-async function handleFacebook(url, tempDir, uniqueId) {
-  return handleGeneric(url, tempDir, uniqueId);
 }

@@ -14,7 +14,7 @@ export default async function handler(req, res) {
 
   try {
     const tempDir = path.join(process.cwd(), 'tmp', 'downloads');
-    const filePath = path.join(tempDir, file);
+    const filePath = path.join(tempDir, decodeURIComponent(file));
     
     // Security check: ensure file is in temp directory
     if (!filePath.startsWith(tempDir)) {
@@ -33,11 +33,16 @@ export default async function handler(req, res) {
       console.log('Converting to MP3...');
       const mp3Path = filePath.replace(/\.[^/.]+$/, '.mp3');
       
-      // Convert to MP3 using ffmpeg
-      const convertCommand = `ffmpeg -i "${filePath}" -acodec mp3 -ab 128k "${mp3Path}" -y`;
-      await execAsync(convertCommand);
-      
-      finalFilePath = mp3Path;
+      try {
+        // Convert to MP3 using ffmpeg
+        const convertCommand = `ffmpeg -i "${filePath}" -acodec mp3 -ab 128k "${mp3Path}" -y`;
+        await execAsync(convertCommand);
+        finalFilePath = mp3Path;
+      } catch (conversionError) {
+        console.error('MP3 conversion failed:', conversionError);
+        // Fall back to original file if conversion fails
+        finalFilePath = filePath;
+      }
     }
     
     // Get file stats
@@ -62,42 +67,110 @@ export default async function handler(req, res) {
       case '.png':
         mimeType = 'image/png';
         break;
+      case '.webm':
+        mimeType = 'video/webm';
+        break;
+      case '.avi':
+        mimeType = 'video/x-msvideo';
+        break;
     }
     
-    const fileName = path.basename(finalFilePath);
+    // Clean filename for Content-Disposition header
+    const originalFileName = path.basename(finalFilePath);
+    const cleanFileName = sanitizeFilename(originalFileName);
     
+    console.log('Original filename:', originalFileName);
+    console.log('Cleaned filename:', cleanFileName);
+    
+    // Set headers with sanitized filename
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Length', fileSize);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${cleanFileName}"`);
     res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Accept-Ranges', 'bytes');
     
-    // Stream the file
-    const readStream = fs.createReadStream(finalFilePath);
-    readStream.pipe(res);
+    // Handle range requests for large files
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+      
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+      res.setHeader('Content-Length', chunksize);
+      res.status(206);
+      
+      const readStream = fs.createReadStream(finalFilePath, { start, end });
+      readStream.pipe(res);
+    } else {
+      // Stream entire file
+      const readStream = fs.createReadStream(finalFilePath);
+      readStream.pipe(res);
+    }
     
-    // Clean up file after streaming (optional)
-    readStream.on('end', () => {
+    // Clean up file after streaming
+    const cleanup = () => {
       setTimeout(() => {
         try {
-          fs.unlinkSync(finalFilePath);
-          if (finalFilePath !== filePath) {
-            fs.unlinkSync(filePath); // Also remove original if converted
+          if (fs.existsSync(finalFilePath)) {
+            fs.unlinkSync(finalFilePath);
+            console.log('Cleaned up:', cleanFileName);
           }
-          console.log('Cleaned up:', fileName);
+          // Also remove original if we converted it
+          if (finalFilePath !== filePath && fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log('Cleaned up original:', path.basename(filePath));
+          }
         } catch (err) {
           console.error('Cleanup error:', err);
         }
-      }, 5000); // Wait 5 seconds before cleanup
-    });
+      }, 10000); // Wait 10 seconds before cleanup
+    };
+    
+    res.on('finish', cleanup);
+    res.on('close', cleanup);
     
   } catch (error) {
     console.error('Streaming error:', error);
-    res.status(500).json({ error: 'Failed to stream file' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to stream file' });
+    }
   }
+}
+
+// Function to sanitize filename for HTTP headers
+function sanitizeFilename(filename) {
+  return filename
+    // Replace full-width characters with half-width equivalents
+    .replace(/？/g, '?')
+    .replace(/｜/g, '|')
+    .replace(/＃/g, '#')
+    .replace(/：/g, ':')
+    .replace(/；/g, ';')
+    .replace(/，/g, ',')
+    .replace(/。/g, '.')
+    .replace(/（/g, '(')
+    .replace(/）/g, ')')
+    .replace(/【/g, '[')
+    .replace(/】/g, ']')
+    .replace(/「/g, '"')
+    .replace(/」/g, '"')
+    // Remove or replace problematic characters for HTTP headers
+    .replace(/[？｜＃：；，。（）【】「」]/g, '')
+    .replace(/[<>:"/\\|?*]/g, '_') // Replace Windows invalid chars
+    .replace(/[^\x00-\x7F]/g, '_') // Replace any non-ASCII characters
+    .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+    .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+    .substring(0, 200) // Limit length
+    || 'download'; // Fallback name if everything gets stripped
 }
 
 export const config = {
   api: {
     responseLimit: false,
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
   },
 };
