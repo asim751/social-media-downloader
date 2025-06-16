@@ -1,27 +1,38 @@
 {
   "name": "social-media-downloader",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf .next tmp/* logs/*",
+    "setup": "npm install && npm run install-tools",
+    "install-tools": "python3 -m pip install yt-dlp requests beautifulsoup4",
+    "test": "echo \"No tests specified\" && exit 0",
+    "health": "curl -f http://localhost:3000/api/health || exit 1"
   },
   "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "next": "15.3.3"
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "mime-types": "^2.1.35",
+    "next": "^14.0.0",
+    "node-fetch": "^3.3.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "uuid": "^9.0.1",
+    "validator": "^13.11.0"
   },
   "devDependencies": {
-    "typescript": "^5",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
-    "eslint": "^9",
-    "eslint-config-next": "15.3.3",
-    "@eslint/eslintrc": "^3"
+    "@types/node": "24.0.1",
+    "@types/react": "19.1.8",
+    "autoprefixer": "^10.4.0",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^14.0.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.3.0"
   }
 }
