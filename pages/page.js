@@ -24,7 +24,7 @@ export default function HomeApp() {
 
   const loadDownloadHistory = async () => {
     try {
-      const response = await fetch('/api/download-history');
+      const response = await fetch('/api/download-production-history');
       const history = await response.json();
       setDownloadHistory(history);
     } catch (error) {
@@ -34,7 +34,7 @@ export default function HomeApp() {
 
   const saveToHistory = async (downloadData) => {
     try {
-      await fetch('/api/download-history', {
+      await fetch('/api/download-production-history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -91,7 +91,7 @@ export default function HomeApp() {
         });
       }, 1000);
       
-      const response = await fetch('/api/download', {
+      const response = await fetch('/api/download-production', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
